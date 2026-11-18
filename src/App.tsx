@@ -210,6 +210,8 @@ export function App() {
     if (transportRef.current) {
       const t = transportRef.current;
       transportRef.current = null;
+      setStatus('disconnected');
+      terminalRef.current?.writeln('\r\n\x1b[33m[Connection] Disconnected.\x1b[0m');
       await t.disconnect();
     } else {
       setStatus((prev) => {
