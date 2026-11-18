@@ -78,6 +78,8 @@ export function App() {
   const terminalRef = useRef<TerminalHandle | null>(null);
   const transportRef = useRef<TerminalTransport | null>(null);
   const lastConnectionRef = useRef<RecentConnection | null>(null);
+  const connectionAttemptRef = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Auth & Firestore sync
   useEffect(() => {
@@ -198,16 +200,32 @@ export function App() {
   );
 
   const disconnectActive = useCallback(async () => {
+    connectionAttemptRef.current += 1;
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     if (transportRef.current) {
       const t = transportRef.current;
       transportRef.current = null;
       await t.disconnect();
+    } else {
+      setStatus((prev) => {
+        if (prev === 'connecting') {
+          terminalRef.current?.writeln('\r\n\x1b[33m[Connection] Cancelled.\x1b[0m');
+          return 'disconnected';
+        }
+        return prev;
+      });
     }
   }, []);
 
   const connectSerialWith = useCallback(
     async (port: WebSerialPort, settings: SerialSettings, labelOverride?: string) => {
       await disconnectActive();
+      const attemptId = ++connectionAttemptRef.current;
 
       const info = port.getInfo();
       const label = labelOverride || formatSerialPortLabel(port);
@@ -247,11 +265,18 @@ export function App() {
             }
           },
         });
+
+        if (attemptId !== connectionAttemptRef.current) {
+          await transport.disconnect();
+          return;
+        }
+
         transportRef.current = transport;
         setStatus('connected');
         terminalRef.current?.writeln(`\x1b[32m[Serial] Connected.\x1b[0m`);
         terminalRef.current?.focus();
       } catch (err) {
+        if (attemptId !== connectionAttemptRef.current) return;
         const msg = err instanceof Error ? err.message : String(err);
         setStatus('error');
         terminalRef.current?.writeln(`\x1b[31m[Serial] Failed: ${msg}\x1b[0m`);
@@ -263,6 +288,9 @@ export function App() {
   const connectSshWith = useCallback(
     async (config: SshConnectionConfig, creds: SshCredentials) => {
       await disconnectActive();
+      const attemptId = ++connectionAttemptRef.current;
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
 
       const label = `${config.username}@${config.host}:${config.port}`;
       const connId = buildSshConnectionId(config);
@@ -283,26 +311,42 @@ export function App() {
       const dims = terminalRef.current?.getDimensions() ?? { cols: 80, rows: 24 };
 
       try {
-        const transport = await connectSshRelay(config, creds, dims, {
-          onConnected: () => {
-            setStatus('connected');
-            terminalRef.current?.focus();
+        const transport = await connectSshRelay(
+          config,
+          creds,
+          dims,
+          {
+            onConnected: () => {
+              if (attemptId !== connectionAttemptRef.current) return;
+              setStatus('connected');
+              terminalRef.current?.focus();
+            },
+            onData: (bytes) => terminalRef.current?.write(bytes),
+            onClose: (err) => {
+              if (transportRef.current === transport) {
+                transportRef.current = null;
+                setStatus(err ? 'error' : 'disconnected');
+                terminalRef.current?.writeln(
+                  err
+                    ? `\r\n\x1b[31m[SSH] Connection closed: ${err.message}\x1b[0m`
+                    : `\r\n\x1b[33m[SSH] Session closed.\x1b[0m`
+                );
+              }
+            },
           },
-          onData: (bytes) => terminalRef.current?.write(bytes),
-          onClose: (err) => {
-            if (transportRef.current === transport) {
-              transportRef.current = null;
-              setStatus(err ? 'error' : 'disconnected');
-              terminalRef.current?.writeln(
-                err
-                  ? `\r\n\x1b[31m[SSH] Connection closed: ${err.message}\x1b[0m`
-                  : `\r\n\x1b[33m[SSH] Session closed.\x1b[0m`
-              );
-            }
-          },
-        });
+          controller.signal
+        );
+
+        if (attemptId !== connectionAttemptRef.current) {
+          await transport.disconnect();
+          return;
+        }
+
+        abortControllerRef.current = null;
         transportRef.current = transport;
       } catch (err) {
+        if (attemptId !== connectionAttemptRef.current) return;
+        abortControllerRef.current = null;
         const msg = err instanceof Error ? err.message : String(err);
         setStatus('error');
         terminalRef.current?.writeln(`\x1b[31m[SSH] Failed: ${msg}\x1b[0m`);

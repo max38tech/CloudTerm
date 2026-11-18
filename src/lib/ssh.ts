@@ -17,12 +17,18 @@ export function connectSshRelay(
     onConnected: () => void;
     onData: (data: Uint8Array) => void;
     onClose: (error?: Error) => void;
-  }
+  },
+  signal?: AbortSignal
 ): Promise<TerminalTransport> {
   return new Promise((resolve, reject) => {
     let settled = false;
     let closed = false;
     const textEncoder = new TextEncoder();
+
+    if (signal?.aborted) {
+      reject(new Error('Connection cancelled'));
+      return;
+    }
 
     let ws: WebSocket;
     try {
@@ -31,6 +37,16 @@ export function connectSshRelay(
       reject(err instanceof Error ? err : new Error(String(err)));
       return;
     }
+
+    const onAbort = () => {
+      if (!settled) {
+        settled = true;
+        closed = true;
+        ws.close();
+        reject(new Error('Connection cancelled'));
+      }
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
     ws.binaryType = 'arraybuffer';
 
