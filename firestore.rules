@@ -1,0 +1,171 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: users
+    // Document ID: {userId} (matches Firebase Auth UID)
+    // Fields:
+    //   - serialDefaults: map (optional)
+    //       - baudRate: number (optional, > 0, <= 10000000)
+    //       - dataBits: int (optional, 5..8)
+    //       - stopBits: number (optional, 1..2)
+    //       - parity: string (optional, 1..24 chars)
+    //       - flowControl: string (optional, 1..24 chars)
+    //   - sshDefaults: map (optional, MUST NOT contain password or privateKey)
+    //       - port: int (optional, 1..65535)
+    //       - relayUrl: string (optional, 0..512 chars)
+    //       - keepaliveInterval: int (optional, 0..3600000)
+    //       - termType: string (optional, 1..64 chars)
+    //   - updatedAt: timestamp or number (optional, >= 0 if number)
+    //
+    // Collection: users/{userId}/connections
+    // Document ID: {connectionId}
+    // Fields:
+    //   - id: string (required, immutable on update, 1..128 chars)
+    //   - mode: string (required, 'serial' | 'ssh')
+    //   - label: string (required, 1..200 chars)
+    //   - pinned: bool (required)
+    //   - lastUsedAt: timestamp or number (required, >= 0 if number)
+    //   - serialConfig: map (optional)
+    //       - baudRate, dataBits, stopBits, parity, flowControl,
+    //         usbVendorId, usbProductId, portName
+    //   - sshConfig: map (optional, MUST NOT contain password or privateKey)
+    //       - host: string (optional, 1..255 chars)
+    //       - port: int (optional, 1..65535)
+    //       - username: string (optional, 0..128 chars)
+    //       - relayUrl: string (optional, 0..512 chars)
+    //       - keepaliveInterval: int (optional, 0..3600000)
+    //       - termType: string (optional, 1..64 chars)
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function hasRequiredFields(fields) {
+      return request.resource.data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    function isValidTimestampOrNumber(val) {
+      return val is timestamp || (val is number && val >= 0);
+    }
+
+    function isValidStringBounds(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidSerialMap(cfg, allowedKeys) {
+      return cfg is map &&
+        cfg.keys().hasOnly(allowedKeys) &&
+        (!('baudRate' in cfg) || (cfg.baudRate is number && cfg.baudRate > 0 && cfg.baudRate <= 10000000)) &&
+        (!('dataBits' in cfg) || (cfg.dataBits is int && cfg.dataBits >= 5 && cfg.dataBits <= 8)) &&
+        (!('stopBits' in cfg) || (cfg.stopBits is number && cfg.stopBits >= 1 && cfg.stopBits <= 2)) &&
+        (!('parity' in cfg) || isValidStringBounds(cfg.parity, 1, 24)) &&
+        (!('flowControl' in cfg) || isValidStringBounds(cfg.flowControl, 1, 24)) &&
+        (!('usbVendorId' in cfg) || (cfg.usbVendorId is int && cfg.usbVendorId >= 0 && cfg.usbVendorId <= 65535)) &&
+        (!('usbProductId' in cfg) || (cfg.usbProductId is int && cfg.usbProductId >= 0 && cfg.usbProductId <= 65535)) &&
+        (!('portName' in cfg) || isValidStringBounds(cfg.portName, 0, 128));
+    }
+
+    function isValidSerialDefaults(cfg) {
+      return isValidSerialMap(cfg, ['baudRate', 'dataBits', 'stopBits', 'parity', 'flowControl']);
+    }
+
+    function isValidSerialConfig(cfg) {
+      return isValidSerialMap(cfg, [
+        'baudRate', 'dataBits', 'stopBits', 'parity', 'flowControl',
+        'usbVendorId', 'usbProductId', 'portName'
+      ]);
+    }
+
+    function isValidSshMap(cfg, allowedKeys) {
+      return cfg is map &&
+        !('password' in cfg) &&
+        !('privateKey' in cfg) &&
+        cfg.keys().hasOnly(allowedKeys) &&
+        (!('host' in cfg) || isValidStringBounds(cfg.host, 1, 255)) &&
+        (!('port' in cfg) || (cfg.port is int && cfg.port >= 1 && cfg.port <= 65535)) &&
+        (!('username' in cfg) || isValidStringBounds(cfg.username, 0, 128)) &&
+        (!('relayUrl' in cfg) || isValidStringBounds(cfg.relayUrl, 0, 512)) &&
+        (!('keepaliveInterval' in cfg) || (cfg.keepaliveInterval is int && cfg.keepaliveInterval >= 0 && cfg.keepaliveInterval <= 3600000)) &&
+        (!('termType' in cfg) || isValidStringBounds(cfg.termType, 1, 64));
+    }
+
+    function isValidSshDefaults(cfg) {
+      return isValidSshMap(cfg, ['port', 'relayUrl', 'keepaliveInterval', 'termType']);
+    }
+
+    function isValidSshConfig(cfg) {
+      return isValidSshMap(cfg, ['host', 'port', 'username', 'relayUrl', 'keepaliveInterval', 'termType']);
+    }
+
+    function isValidUserPreferences(data) {
+      return hasOnlyAllowedFields(['serialDefaults', 'sshDefaults', 'updatedAt']) &&
+        (!('serialDefaults' in data) || isValidSerialDefaults(data.serialDefaults)) &&
+        (!('sshDefaults' in data) || isValidSshDefaults(data.sshDefaults)) &&
+        (!('updatedAt' in data) || isValidTimestampOrNumber(data.updatedAt));
+    }
+
+    function isValidConnection(data) {
+      return hasRequiredFields(['id', 'mode', 'label', 'pinned', 'lastUsedAt']) &&
+        hasOnlyAllowedFields(['id', 'mode', 'label', 'pinned', 'lastUsedAt', 'serialConfig', 'sshConfig']) &&
+        isValidStringBounds(data.id, 1, 128) &&
+        data.mode in ['serial', 'ssh'] &&
+        isValidStringBounds(data.label, 1, 200) &&
+        data.pinned is bool &&
+        isValidTimestampOrNumber(data.lastUsedAt) &&
+        (!('serialConfig' in data) || isValidSerialConfig(data.serialConfig)) &&
+        (!('sshConfig' in data) || isValidSshConfig(data.sshConfig));
+    }
+
+    // ===============================================================
+    // Collection Rules
+    // ===============================================================
+
+    match /users/{userId} {
+      allow read: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUserPreferences(request.resource.data);
+      allow update: if isOwner(userId) && isValidUserPreferences(request.resource.data);
+      allow delete: if isOwner(userId);
+
+      match /connections/{connectionId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidConnection(request.resource.data);
+        allow update: if isOwner(userId) &&
+          isValidConnection(request.resource.data) &&
+          request.resource.data.id == resource.data.id;
+        allow delete: if isOwner(userId);
+      }
+    }
+
+    // ===============================================================
+    // Default Deny
+    // ===============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
