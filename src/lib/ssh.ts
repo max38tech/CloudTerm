@@ -9,6 +9,48 @@ interface RelayServerMessage {
   message?: string;
 }
 
+export function getRelayHealthUrl(relayUrl: string): string | null {
+  try {
+    const url = new URL(relayUrl);
+    if (url.protocol === 'ws:') {
+      url.protocol = 'http:';
+    } else if (url.protocol === 'wss:') {
+      url.protocol = 'https:';
+    } else if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return null;
+    }
+    url.pathname = '/health';
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+export async function checkSshRelayHealth(
+  relayUrl: string,
+  timeoutMs = 1500
+): Promise<boolean> {
+  const healthUrl = getRelayHealthUrl(relayUrl);
+  if (!healthUrl) return false;
+
+  const controller = new AbortController();
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(healthUrl, {
+      method: 'GET',
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    return res.ok;
+  } catch {
+    return false;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 export function connectSshRelay(
   config: SshConnectionConfig,
   credentials: SshCredentials,

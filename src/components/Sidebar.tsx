@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  Download,
   KeyRound,
   Pin,
   PinOff,
@@ -12,6 +13,7 @@ import {
   Usb,
   X,
 } from 'lucide-react';
+import type { RelayStatus } from './RelaySetupModal';
 import type {
   ConnectionMode,
   ConnectionStatus,
@@ -55,6 +57,9 @@ interface SidebarProps {
   sshSettings: SshSettings;
   onUpdateSshSettings: (next: SshSettings) => void;
   onConnectSsh: () => void;
+  relayStatus: RelayStatus;
+  onCheckRelay: () => void;
+  onOpenRelaySetup: () => void;
 
   // Recent Connections
   recentConnections: RecentConnection[];
@@ -90,6 +95,9 @@ export function Sidebar({
   sshSettings,
   onUpdateSshSettings,
   onConnectSsh,
+  relayStatus,
+  onCheckRelay,
+  onOpenRelaySetup,
   recentConnections,
   onSelectRecent,
   onTogglePin,
@@ -562,6 +570,55 @@ export function Sidebar({
                       />
                     </div>
                   </div>
+                )}
+              </div>
+
+              {/* Local Relay Status */}
+              <div
+                className={`flex items-center justify-between gap-2 px-2.5 py-2 rounded-md border text-[11px] ${
+                  relayStatus === 'online'
+                    ? 'bg-emerald-500/5 border-emerald-500/20 text-emerald-300'
+                    : 'bg-amber-500/10 border-amber-500/25 text-amber-200'
+                }`}
+              >
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span
+                    className={`w-2 h-2 rounded-full shrink-0 ${
+                      relayStatus === 'online'
+                        ? 'bg-emerald-400'
+                        : relayStatus === 'checking'
+                          ? 'bg-amber-400 animate-pulse'
+                          : 'bg-rose-400'
+                    }`}
+                  />
+                  <span className="truncate">
+                    {relayStatus === 'online'
+                      ? 'SSH relay online'
+                      : relayStatus === 'checking'
+                        ? 'Checking relay...'
+                        : 'Relay not detected'}
+                  </span>
+                </div>
+
+                {relayStatus === 'online' ? (
+                  <button
+                    type="button"
+                    onClick={onCheckRelay}
+                    className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/70 transition-colors"
+                    title="Re-check local relay"
+                    aria-label="Re-check local relay"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onOpenRelaySetup}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 font-medium shrink-0 transition-colors"
+                  >
+                    <Download className="w-3 h-3" />
+                    <span>Install</span>
+                  </button>
                 )}
               </div>
 

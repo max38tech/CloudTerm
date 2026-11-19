@@ -1,0 +1,85 @@
+name: Build & Release CloudTerm SSH Relay
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'relay/**'
+      - '.github/workflows/release-relay.yml'
+    tags:
+      - 'v*'
+      - 'relay-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            ext: ''
+          - goos: linux
+            goarch: arm64
+            ext: ''
+          - goos: darwin
+            goarch: amd64
+            ext: ''
+          - goos: darwin
+            goarch: arm64
+            ext: ''
+          - goos: windows
+            goarch: amd64
+            ext: '.exe'
+          - goos: windows
+            goarch: arm64
+            ext: '.exe'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'relay/go.mod'
+          cache-dependency-path: 'relay/go.sum'
+
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
+        working-directory: relay
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p ../dist-relay
+          go build -trimpath -ldflags="-s -w" -o "../dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-relay
+          merge-multiple: true
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'relay-latest' }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'CloudTerm SSH Relay (Latest)' }}
+          make_latest: true
+          files: dist-relay/*

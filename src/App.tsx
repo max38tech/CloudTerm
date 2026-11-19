@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { onAuthStateChanged, type User } from 'firebase/auth';
 import { Sidebar } from './components/Sidebar';
+import { RelaySetupModal, type RelayStatus } from './components/RelaySetupModal';
 import { TerminalView, type TerminalHandle } from './components/TerminalView';
 import { TopBar } from './components/TopBar';
 import {
@@ -17,7 +18,7 @@ import {
   requestSerialPort,
   type WebSerialPort,
 } from './lib/serial';
-import { connectSshRelay } from './lib/ssh';
+import { checkSshRelayHealth, connectSshRelay } from './lib/ssh';
 import {
   buildSerialConnectionId,
   buildSshConnectionId,
@@ -69,6 +70,9 @@ export function App() {
   const [sshSettings, setSshSettings] = useState<SshSettings>(
     initialPrefs.current.sshDefaults
   );
+  const [relayStatus, setRelayStatus] = useState<RelayStatus>('checking');
+  const [relayModalOpen, setRelayModalOpen] = useState(false);
+  const [relayBannerDismissed, setRelayBannerDismissed] = useState(false);
 
   // Recent connections
   const [recentConnections, setRecentConnections] = useState<RecentConnection[]>(
@@ -132,6 +136,17 @@ export function App() {
   useEffect(() => {
     void refreshSerialPorts();
   }, [refreshSerialPorts]);
+
+  const checkRelay = useCallback(async () => {
+    setRelayStatus('checking');
+    const ok = await checkSshRelayHealth(sshSettings.relayUrl);
+    setRelayStatus(ok ? 'online' : 'offline');
+    return ok;
+  }, [sshSettings.relayUrl]);
+
+  useEffect(() => {
+    void checkRelay();
+  }, [checkRelay]);
 
   const handleRequestSerialPort = async () => {
     try {
@@ -352,6 +367,10 @@ export function App() {
         const msg = err instanceof Error ? err.message : String(err);
         setStatus('error');
         terminalRef.current?.writeln(`\x1b[31m[SSH] Failed: ${msg}\x1b[0m`);
+        if (msg.includes('Unable to reach local SSH relay')) {
+          setRelayStatus('offline');
+          setRelayModalOpen(true);
+        }
       }
     },
     [disconnectActive, recordConnectionAttempt]
@@ -519,24 +538,64 @@ export function App() {
           sshSettings={sshSettings}
           onUpdateSshSettings={handleUpdateSshSettings}
           onConnectSsh={handleConnectSsh}
+          relayStatus={relayStatus}
+          onCheckRelay={() => void checkRelay()}
+          onOpenRelaySetup={() => setRelayModalOpen(true)}
           recentConnections={recentConnections}
           onSelectRecent={(conn) => void handleSelectRecent(conn)}
           onTogglePin={handleTogglePin}
           onDeleteRecent={handleDeleteRecent}
         />
 
-        <main className="flex-1 min-w-0 h-full bg-zinc-950">
-          <TerminalView
-            ref={terminalRef}
-            onInput={(data) => {
-              void transportRef.current?.write(data);
-            }}
-            onResize={(cols, rows) => {
-              transportRef.current?.resize?.(cols, rows);
-            }}
-          />
+        <main className="flex-1 min-w-0 h-full bg-zinc-950 flex flex-col">
+          {relayStatus === 'offline' && !relayBannerDismissed && (
+            <div className="shrink-0 bg-amber-500/10 border-b border-amber-500/25 px-4 py-2 flex items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-2 text-amber-200 min-w-0">
+                <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />
+                <span className="truncate">
+                  Local SSH relay (<code className="font-mono">{sshSettings.relayUrl}</code>) not detected. Install it to enable SSH connections.
+                </span>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setRelayModalOpen(true)}
+                  className="px-2.5 py-1 rounded bg-amber-500 hover:bg-amber-400 text-zinc-950 font-semibold transition-colors"
+                >
+                  Install Relay
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRelayBannerDismissed(true)}
+                  className="px-2 py-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/70 transition-colors"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex-1 min-h-0">
+            <TerminalView
+              ref={terminalRef}
+              onInput={(data) => {
+                void transportRef.current?.write(data);
+              }}
+              onResize={(cols, rows) => {
+                transportRef.current?.resize?.(cols, rows);
+              }}
+            />
+          </div>
         </main>
       </div>
+
+      <RelaySetupModal
+        open={relayModalOpen}
+        onClose={() => setRelayModalOpen(false)}
+        relayUrl={sshSettings.relayUrl}
+        relayStatus={relayStatus}
+        onCheckRelay={checkRelay}
+      />
     </div>
   );
 }
