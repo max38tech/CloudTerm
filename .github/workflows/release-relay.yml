@@ -151,9 +151,6 @@ jobs:
               '-d', "RelayExePath=$exePath",
               '-o', $msiPath
             )
-            if ($env:WIX_ARCH -eq 'arm64') {
-              $wixArgs += '-sval'
-            }
             & wix @wixArgs
             if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit code $LASTEXITCODE" }
 
