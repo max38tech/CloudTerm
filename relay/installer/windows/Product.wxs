@@ -19,7 +19,7 @@
       <Directory Id="INSTALLFOLDER" Name="CloudTerm" />
     </StandardDirectory>
 
-    <Component Id="RelayExecutable" Directory="INSTALLFOLDER" Guid="*">
+    <Component Id="RelayExecutable" Directory="INSTALLFOLDER" Guid="3F7A9C12-4E8B-4A6D-9B2E-1C5D8F3A7E4B">
       <File Id="RelayExe" Source="$(var.RelayExePath)" Name="cloudterm-relay.exe" />
       <RegistryValue
         Root="HKCU"
