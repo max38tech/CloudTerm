@@ -16,29 +16,19 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build-unix:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
           - goos: linux
             goarch: amd64
-            ext: ''
           - goos: linux
             goarch: arm64
-            ext: ''
           - goos: darwin
             goarch: amd64
-            ext: ''
           - goos: darwin
             goarch: arm64
-            ext: ''
-          - goos: windows
-            goarch: amd64
-            ext: '.exe'
-          - goos: windows
-            goarch: arm64
-            ext: '.exe'
 
     steps:
       - name: Checkout
@@ -58,16 +48,133 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
         run: |
           mkdir -p ../dist-relay
-          go build -trimpath -ldflags="-s -w" -o "../dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}" .
+          go build -trimpath -ldflags="-s -w" -o "../dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.ext }}
+          path: dist-relay/cloudterm-relay-${{ matrix.goos }}-${{ matrix.goarch }}
+
+  build-windows:
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        include:
+          - goarch: amd64
+            wix_arch: x64
+          - goarch: arm64
+            wix_arch: arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: 'relay/go.mod'
+          cache-dependency-path: 'relay/go.sum'
+
+      - name: Install WiX Toolset
+        shell: pwsh
+        run: dotnet tool install --global wix --version 5.*
+
+      - name: Build Windows binary & MSI (${{ matrix.goarch }})
+        shell: pwsh
+        env:
+          CGO_ENABLED: '0'
+          GOOS: windows
+          GOARCH: ${{ matrix.goarch }}
+          WIX_ARCH: ${{ matrix.wix_arch }}
+          WINDOWS_CERT_BASE64: ${{ secrets.WINDOWS_CERT_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $distDir = Join-Path $PWD 'dist-relay'
+          New-Item -ItemType Directory -Force -Path $distDir | Out-Null
+
+          $exePath = Join-Path $distDir "cloudterm-relay-windows-$env:GOARCH.exe"
+          $msiPath = Join-Path $distDir "cloudterm-relay-windows-$env:GOARCH.msi"
+
+          Push-Location relay
+          go build -trimpath -ldflags="-s -w -H=windowsgui" -o $exePath .
+          if ($LASTEXITCODE -ne 0) { throw "go build failed with exit code $LASTEXITCODE" }
+          Pop-Location
+
+          # Derive numeric Major.Minor.Patch version required by MSI
+          if ($env:GITHUB_REF_NAME -match '(\d+\.\d+\.\d+)') {
+            $msiVersion = $Matches[1]
+          } else {
+            $msiVersion = "1.0.$env:GITHUB_RUN_NUMBER"
+          }
+          Write-Host "MSI ProductVersion: $msiVersion"
+
+          $pfxPath = $null
+          $signtool = $null
+          $timestampUrl = if ($env:WINDOWS_TIMESTAMP_URL) { $env:WINDOWS_TIMESTAMP_URL } else { 'http://timestamp.digicert.com' }
+
+          function Sign-File([string]$TargetPath) {
+            if (-not $pfxPath) { return }
+            & $signtool sign /fd SHA256 /tr $timestampUrl /td SHA256 /f $pfxPath /p $env:WINDOWS_CERT_PASSWORD /d 'CloudTerm SSH Relay' /du 'https://cloudterm.fyi' $TargetPath
+            if ($LASTEXITCODE -ne 0) { throw "signtool sign failed for $TargetPath" }
+            & $signtool verify /pa /v $TargetPath
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for $TargetPath" }
+          }
+
+          try {
+            if ($env:WINDOWS_CERT_BASE64) {
+              $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin\*\x64\signtool.exe' |
+                Sort-Object FullName -Descending |
+                Select-Object -First 1 -ExpandProperty FullName
+              if (-not $signtool) { throw 'signtool.exe not found in Windows SDK' }
+
+              $pfxPath = Join-Path $env:RUNNER_TEMP 'codesign.pfx'
+              [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERT_BASE64.Trim()))
+              Write-Host "Signing enabled via $signtool"
+            } else {
+              Write-Host '::warning::WINDOWS_CERT_BASE64 secret is not configured; building unsigned Windows binary and MSI.'
+            }
+
+            # Sign the executable before embedding it in the MSI
+            Sign-File $exePath
+
+            $wixArgs = @(
+              'build',
+              'relay/installer/windows/Product.wxs',
+              '-arch', $env:WIX_ARCH,
+              '-d', "ProductVersion=$msiVersion",
+              '-d', "RelayExePath=$exePath",
+              '-o', $msiPath
+            )
+            if ($env:WIX_ARCH -eq 'arm64') {
+              $wixArgs += '-sval'
+            }
+            & wix @wixArgs
+            if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit code $LASTEXITCODE" }
+
+            # Sign the MSI installer
+            Sign-File $msiPath
+          } finally {
+            if ($pfxPath -and (Test-Path $pfxPath)) {
+              Remove-Item -Force $pfxPath -ErrorAction SilentlyContinue
+            }
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudterm-relay-windows-${{ matrix.goarch }}
+          path: |
+            dist-relay/cloudterm-relay-windows-${{ matrix.goarch }}.exe
+            dist-relay/cloudterm-relay-windows-${{ matrix.goarch }}.msi
 
   release:
-    needs: build
+    needs: [build-unix, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts

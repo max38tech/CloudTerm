@@ -1,0 +1,61 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="CloudTerm SSH Relay"
+    Manufacturer="CloudTerm"
+    Version="$(var.ProductVersion)"
+    UpgradeCode="A8E4C7D2-9F3B-4B1E-8C2A-5D6E7F8A9B0C"
+    Scope="perUser"
+    InstallerVersion="500">
+
+    <SummaryInformation Description="Local WebSocket-to-SSH relay for CloudTerm" />
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" />
+
+    <Property Id="ARPHELPLINK" Value="https://cloudterm.fyi" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/max38tech/CloudTerm" />
+
+    <StandardDirectory Id="SystemFolder" />
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="CloudTerm" />
+    </StandardDirectory>
+
+    <Component Id="RelayExecutable" Directory="INSTALLFOLDER" Guid="*">
+      <File Id="RelayExe" Source="$(var.RelayExePath)" Name="cloudterm-relay.exe" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\CloudTerm\Relay"
+        Name="Installed"
+        Type="integer"
+        Value="1"
+        KeyPath="yes" />
+      <RegistryValue
+        Root="HKCU"
+        Key="Software\Microsoft\Windows\CurrentVersion\Run"
+        Name="CloudTermRelay"
+        Type="string"
+        Value="&quot;[#RelayExe]&quot; -addr 127.0.0.1:8022" />
+      <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+    </Component>
+
+    <Feature Id="MainFeature" Title="CloudTerm SSH Relay" Level="1">
+      <ComponentRef Id="RelayExecutable" />
+    </Feature>
+
+    <CustomAction
+      Id="StopRelay"
+      Directory="SystemFolder"
+      ExeCommand="&quot;[SystemFolder]taskkill.exe&quot; /F /IM cloudterm-relay.exe"
+      Return="ignore" />
+
+    <CustomAction
+      Id="LaunchRelay"
+      FileRef="RelayExe"
+      ExeCommand="-addr 127.0.0.1:8022"
+      Return="asyncNoWait" />
+
+    <InstallExecuteSequence>
+      <Custom Action="StopRelay" Before="InstallValidate" />
+      <Custom Action="LaunchRelay" After="InstallFinalize" Condition="NOT REMOVE~=&quot;ALL&quot;" />
+    </InstallExecuteSequence>
+  </Package>
+</Wix>

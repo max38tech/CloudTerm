@@ -31,6 +31,10 @@ function detectPlatform(): Platform {
 
 const GITHUB_RELEASES_URL =
   'https://github.com/max38tech/CloudTerm/releases/latest';
+const WINDOWS_MSI_AMD64_URL =
+  'https://github.com/max38tech/CloudTerm/releases/latest/download/cloudterm-relay-windows-amd64.msi';
+const WINDOWS_MSI_ARM64_URL =
+  'https://github.com/max38tech/CloudTerm/releases/latest/download/cloudterm-relay-windows-arm64.msi';
 
 export function RelaySetupModal({
   open,
@@ -176,19 +180,25 @@ export function RelaySetupModal({
             ))}
           </div>
 
-          {/* Primary Windows 1-click installer */}
+          {/* Primary Windows MSI installer */}
           {platform === 'windows' && (
             <div className="space-y-2">
               <a
-                href="/install-cloudterm-relay.cmd"
-                download="install-cloudterm-relay.cmd"
+                href={WINDOWS_MSI_AMD64_URL}
                 className="w-full inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-xs font-semibold bg-emerald-500 hover:bg-emerald-400 text-zinc-950 transition-colors"
               >
                 <Download className="w-4 h-4" />
-                <span>Download Windows Installer (.cmd)</span>
+                <span>Download Windows Installer (.msi)</span>
               </a>
               <p className="text-[11px] text-zinc-500">
-                Open the downloaded file to install and start the relay automatically (no terminal commands needed).
+                Open the downloaded installer to install and start the relay automatically (no terminal commands or admin prompt needed). Using Windows on ARM?{' '}
+                <a
+                  href={WINDOWS_MSI_ARM64_URL}
+                  className="text-zinc-300 underline hover:text-zinc-100"
+                >
+                  Download ARM64 (.msi)
+                </a>
+                .
               </p>
             </div>
           )}
