@@ -1,4 +1,5 @@
-﻿$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
 
 $Repo = 'max38tech/CloudTerm'
 $InstallDir = Join-Path $env:LOCALAPPDATA 'CloudTerm'
@@ -11,7 +12,7 @@ Write-Host '==> CloudTerm SSH Relay Installer' -ForegroundColor Cyan
 try {
   $resp = Invoke-WebRequest -Uri $HealthUrl -TimeoutSec 2 -UseBasicParsing
   if ($resp.StatusCode -eq 200) {
-    Write-Host "✓ cloudterm-relay is already running at $Addr" -ForegroundColor Green
+    Write-Host "[OK] cloudterm-relay is already running at $Addr" -ForegroundColor Green
     exit 0
   }
 } catch {}
@@ -24,7 +25,7 @@ if (-not (Test-Path $BinPath)) {
   Write-Host "==> Downloading cloudterm-relay (windows/$Arch)..."
   try {
     Invoke-WebRequest -Uri $ReleaseUrl -OutFile $BinPath -UseBasicParsing
-    Write-Host "✓ Installed prebuilt binary to $BinPath" -ForegroundColor Green
+    Write-Host "[OK] Installed prebuilt binary to $BinPath" -ForegroundColor Green
   } catch {
     if (Get-Command go -ErrorAction SilentlyContinue) {
       Write-Host '==> No prebuilt release found; building from GitHub source with Go...'
@@ -38,7 +39,7 @@ if (-not (Test-Path $BinPath)) {
         Push-Location $TmpSrc
         go build -trimpath -ldflags="-s -w" -o $BinPath .
         Pop-Location
-        Write-Host "✓ Built and installed to $BinPath" -ForegroundColor Green
+        Write-Host "[OK] Built and installed to $BinPath" -ForegroundColor Green
       } finally {
         Remove-Item -Recurse -Force $TmpSrc -ErrorAction SilentlyContinue
       }
@@ -48,7 +49,7 @@ if (-not (Test-Path $BinPath)) {
     }
   }
 } else {
-  Write-Host "✓ Found existing binary at $BinPath" -ForegroundColor Green
+  Write-Host "[OK] Found existing binary at $BinPath" -ForegroundColor Green
 }
 
 # Add Startup shortcut so it auto-starts on login
@@ -61,7 +62,7 @@ try {
   $Shortcut.Arguments = "-addr $Addr"
   $Shortcut.WindowStyle = 7
   $Shortcut.Save()
-  Write-Host "✓ Added Startup shortcut ($ShortcutPath)" -ForegroundColor Green
+  Write-Host "[OK] Added Startup shortcut ($ShortcutPath)" -ForegroundColor Green
 } catch {
   Write-Warning "Could not create Startup shortcut: $_"
 }
@@ -73,7 +74,7 @@ for ($i = 0; $i -lt 10; $i++) {
   try {
     $resp = Invoke-WebRequest -Uri $HealthUrl -TimeoutSec 1 -UseBasicParsing
     if ($resp.StatusCode -eq 200) {
-      Write-Host "✓ CloudTerm SSH Relay is online at ws://$Addr" -ForegroundColor Green
+      Write-Host "[OK] CloudTerm SSH Relay is online at ws://$Addr" -ForegroundColor Green
       exit 0
     }
   } catch {}
